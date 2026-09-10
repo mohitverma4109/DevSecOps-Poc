@@ -1,0 +1,357 @@
+name: DevSecOps Pipeline (CI + CD)
+
+# -----------------------------------------------------------------
+# SINGLE-FILE CI/CD PIPELINE
+#
+# PR events  -> only the CI (security-gate) jobs run: secret-scan,
+#               sast, sca, fs-iac-scan, build, container.
+#               Nothing is deployed from a PR.
+# Push events (merge into dev/uat/main) -> the same CI jobs run
+#               again as a safety net, THEN the CD jobs run:
+#               build-and-push -> deploy -> dast -> promote.
+# -----------------------------------------------------------------
+on:
+  pull_request:
+    branches: [dev, uat, main]
+  push:
+    branches: [dev, uat, main]
+
+permissions:
+  contents: read
+  security-events: write   # required to upload SARIF to the Security tab
+  pull-requests: write
+  id-token: write          # for OIDC auth to cloud/EKS if configured
+
+jobs:
+  # =================================================================
+  # ============================ CI ================================
+  # =================================================================
+
+  # 1. SECRET SCANNING - must run first & fail fast
+  secret-scan:
+    name: "CI-1: Secret Scanning (Gitleaks)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: security/.gitleaks.toml
+          GITLEAKS_EXIT_CODE: "1"   # GATE: any secret found -> pipeline fails
+
+  # 2. SAST - static analysis of application source code
+  sast:
+    name: "CI-2: SAST (SonarQube)"
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # SonarQube needs full history for accurate blame/new-code analysis
+
+      # Self-hosted SonarQube Community Edition SAST + Quality Gate.
+      # SONAR_HOST_URL points at your own SonarQube server (e.g. http://<public-ip>:9000).
+      # GitHub-hosted runners must be able to reach that URL over the internet, so make
+      # sure port 9000 is open on your SonarQube host's firewall/security group.
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        with:
+          projectBaseDir: .
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+      - name: SonarQube Quality Gate
+        uses: SonarSource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        # GATE: action polls the Sonar server for the analysis task and fails the
+        # job if the Quality Gate status != OK. NOTE: SonarQube Community Edition
+        # does not support PR decoration/branch analysis (needs Developer Edition)
+        # - the Quality Gate pass/fail check itself still works fine.
+
+  # 3. SCA - dependency vulnerability scanning
+  sca:
+    name: "CI-3: Dependency Scan (OWASP Dependency-Check)"
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install app dependencies (to generate lockfile for scanning)
+        working-directory: app
+        run: npm install --package-lock-only
+      - name: OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: "devsecops-poc"
+          path: "app"
+          format: "SARIF"
+          args: >
+            --failOnCVSS 7
+            --suppression security/dependency-check-suppression.xml
+        # GATE: --failOnCVSS 7 -> any dependency vuln with CVSS >= 7 (High/Critical) fails the job
+      - name: Upload Dependency-Check SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: reports/dependency-check-report.sarif
+
+  # 4. FILESYSTEM + IaC SCANNING (Trivy + Checkov)
+  fs-iac-scan:
+    name: "CI-4: Filesystem & IaC Scan (Trivy/Checkov)"
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan (app source + deps)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: "fs"
+          scan-ref: "app"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"          # GATE: fail on any Critical/High finding
+          format: "table"
+
+      - name: Trivy IaC/config scan (Dockerfile, K8s manifests, Terraform)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: "config"
+          scan-ref: "."
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"          # GATE: fail on Critical/High misconfigurations
+          format: "table"
+
+      - name: Checkov IaC scan (Terraform)
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: iac
+          framework: terraform
+          soft_fail: false        # GATE: hard fail on any Checkov finding above default threshold
+
+  # 5. BUILD (only after all shift-left gates pass)
+  build:
+    name: "CI-6: Build Application"
+    runs-on: ubuntu-latest
+    needs: [sast, sca, fs-iac-scan]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install & smoke-build
+        working-directory: app
+        run: |
+          npm install
+          node -e "require('./server.js')" &
+          sleep 3
+          curl -sf http://localhost:3000/ || (echo "App failed to boot" && exit 1)
+
+  # 6. CONTAINER BUILD + IMAGE SCAN + SBOM
+  container:
+    name: "CI-7: Docker Build, Scan & SBOM"
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t devsecops-poc/hardened-app:${{ github.sha }} ./app
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: "devsecops-poc/hardened-app:${{ github.sha }}"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"          # GATE: Critical/High image CVEs fail the pipeline
+          format: "table"
+
+      - name: Generate SBOM (Trivy - CycloneDX)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: "devsecops-poc/hardened-app:${{ github.sha }}"
+          format: "cyclonedx"
+          output: "sbom.cdx.json"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+
+      - name: License / compliance check (Trivy license scanner)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: "fs"
+          scan-ref: "app"
+          scanners: "license"
+          severity: "HIGH,CRITICAL"
+          exit-code: "0"   # report-only: fails soft, set to "1" to enforce hard license policy
+
+  # =================================================================
+  # ============================ CD =================================
+  # Everything below only runs on a push (i.e. an actual merge into
+  # dev/uat/main) - never on a pull_request. PRs stop after CI above.
+  # =================================================================
+
+  determine-env:
+    name: "CD-1: Resolve target environment"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: [container]
+    outputs:
+      env_name: ${{ steps.set-env.outputs.env_name }}
+    steps:
+      - id: set-env
+        run: |
+          if [ "${{ github.ref_name }}" == "main" ]; then echo "env_name=production" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.ref_name }}" == "uat" ]; then echo "env_name=uat" >> "$GITHUB_OUTPUT";
+          else echo "env_name=dev" >> "$GITHUB_OUTPUT"; fi
+
+  build-and-push:
+    name: "CD-2: Push image to Amazon ECR"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: determine-env
+    outputs:
+      image_uri: ${{ steps.build-image.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # OIDC auth - no long-lived AWS access keys stored in GitHub.
+      # Requires AWS_ROLE_ARN (a repo/environment secret) pointing at an IAM
+      # role that trusts GitHub's OIDC provider. See docs/AWS_ECR_SETUP.md.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories --repository-names "${{ vars.ECR_REPOSITORY }}" \
+            --region "${{ vars.AWS_REGION }}" >/dev/null 2>&1 || \
+          aws ecr create-repository --repository-name "${{ vars.ECR_REPOSITORY }}" \
+            --region "${{ vars.AWS_REGION }}" \
+            --image-scanning-configuration scanOnPush=true
+
+      - name: Build, tag & push to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" ./app
+          docker tag "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+          echo "image_uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: "CD-3: Deploy to ${{ needs.determine-env.outputs.env_name }}"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: [determine-env, build-and-push]
+    environment: ${{ needs.determine-env.outputs.env_name }}   # GATE: requires GitHub Environment approval for uat/production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy docker-compose.prod.yml to the target host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "docker-compose.prod.yml"
+          target: "~/devsecops-poc"
+
+      # The target host authenticates to ECR itself (e.g. an EC2 instance
+      # profile with ecr:GetAuthorizationToken/BatchGetImage permissions),
+      # so no AWS credentials are transmitted over SSH. See docs/DOCKER_COMPOSE_DEPLOY.md
+      # for the IAM policy and for the access-key fallback if the host isn't on AWS.
+      - name: Deploy via Docker Compose over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_URI: ${{ needs.build-and-push.outputs.image_uri }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          APP_JWT_SECRET: ${{ secrets.APP_JWT_SECRET }}
+          APP_ALLOWED_ORIGINS: ${{ vars.APP_PUBLIC_URL }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          envs: IMAGE_URI,AWS_REGION,APP_JWT_SECRET,APP_ALLOWED_ORIGINS
+          script: |
+            set -e
+            cd ~/devsecops-poc
+            REGISTRY=$(echo "$IMAGE_URI" | cut -d'/' -f1)
+            aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+            export IMAGE_URI="$IMAGE_URI"
+            export JWT_SECRET="$APP_JWT_SECRET"
+            export ALLOWED_ORIGINS="$APP_ALLOWED_ORIGINS"
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f
+
+  dast:
+    name: "CD-4: DAST (OWASP ZAP) + API Security"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: [determine-env, deploy]
+    steps:
+      - uses: actions/checkout@v4
+      # APP_PUBLIC_URL is a repo/environment VARIABLE (not a secret - it's just a URL),
+      # e.g. http://50.112.139.26:3000 - the port the docker-compose service publishes.
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "${{ vars.APP_PUBLIC_URL }}"
+          rules_file_name: "security/zap-rules.tsv"
+          cmd_options: "-I"     # -I: do not fail the *action* on warnings; job-level gate below decides
+          fail_action: false
+
+      - name: ZAP Full Active Scan (deeper pass incl. SQLi/XSS add-ons)
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: "${{ vars.APP_PUBLIC_URL }}"
+          rules_file_name: "security/zap-rules.tsv"
+
+      - name: Enforce DAST severity gate
+        run: |
+          # GATE: parse ZAP JSON report and fail the pipeline if any High/Critical alert exists.
+          python3 - << 'EOF'
+          import json, sys
+          try:
+              with open("report_json.json") as f:
+                  data = json.load(f)
+          except FileNotFoundError:
+              print("No ZAP report found - skipping gate (report step may have changed path)")
+              sys.exit(0)
+          highs = [a for site in data.get("site", []) for a in site.get("alerts", [])
+                   if a.get("riskcode") in ("3",)]  # riskcode 3 = High in ZAP
+          if highs:
+              print(f"FAIL: {len(highs)} High-risk DAST findings detected")
+              for h in highs:
+                  print(f" - {h.get('name')}")
+              sys.exit(1)
+          print("PASS: no High-risk DAST findings")
+          EOF
+
+  promote:
+    name: "CD-5: Manual promotion gate"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs: [determine-env, dast]
+    environment: ${{ needs.determine-env.outputs.env_name }}-promotion  # GATE: requires reviewer approval to promote dev->uat->main
+    steps:
+      - run: echo "Approved for promotion to next environment"

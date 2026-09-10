@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devsecops-poc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hardened-app-svc
+  namespace: devsecops-poc
+spec:
+  selector:
+    app: hardened-app
+  # VULN: NodePort exposed on all cluster nodes, wide-open for a POC app
+  type: NodePort
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30080

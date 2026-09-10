@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  hardened-app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: devsecops-poc/hardened-app:local
+    container_name: hardened-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - JWT_SECRET=local-dev-secret-change-me
+      - ALLOWED_ORIGINS=http://localhost:3000
+    networks:
+      - poc-net
+
+  # Optional local OWASP ZAP baseline scan against the running app.
+  # Run manually with: docker compose run zap
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: zap-dast
+    depends_on:
+      - hardened-app
+    networks:
+      - poc-net
+    entrypoint: >
+      zap-baseline.py -t http://hardened-app:3000
+      -r /zap/wrk/zap-report.html -J /zap/wrk/zap-report.json -I
+    volumes:
+      - ./security/zap-reports:/zap/wrk:rw
+
+networks:
+  poc-net:
+    driver: bridge

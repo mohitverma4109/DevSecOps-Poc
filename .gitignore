@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+sbom.cdx.json
+security/zap-reports/
+kubeconfig.yaml
+docs/

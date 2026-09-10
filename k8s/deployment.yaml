@@ -1,0 +1,75 @@
+# -----------------------------------------------------------------
+# HARDENED KUBERNETES MANIFEST (optional reference - pipeline.yml
+# deploys via Docker Compose, not Kubernetes; kept here for anyone
+# who wants to practice deploying this app on a cluster instead).
+#
+# Fixes applied:
+#  - Pinned image tag, not 'latest'
+#  - Secrets injected from a K8s Secret, never plaintext in the manifest
+#  - Non-root, no privilege escalation, read-only root filesystem
+#  - Resource requests/limits set
+#  - Liveness/readiness probes configured
+# -----------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hardened-app
+  namespace: devsecops-poc
+  labels:
+    app: hardened-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hardened-app
+  template:
+    metadata:
+      labels:
+        app: hardened-app
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: hardened-app
+          image: <account>.dkr.ecr.<region>.amazonaws.com/devsecops-poc/hardened-app:1.0.0  # pinned tag
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: app-secrets
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: devsecops-poc
+type: Opaque
+stringData:
+  JWT_SECRET: "replace-with-a-generated-secret"   # e.g. `openssl rand -hex 32` - set at apply time, never commit the real value

@@ -1,0 +1,22 @@
+{
+  "name": "hardened-devsecops-poc",
+  "version": "1.0.0",
+  "description": "Hardened Node.js/Express app for DevSecOps pipeline validation (clean-baseline testing)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"no tests\" && exit 0"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "sqlite3": "^5.1.7",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0"
+  },
+  "license": "MIT"
+}

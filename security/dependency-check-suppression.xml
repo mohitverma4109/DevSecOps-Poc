@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <!--
+    Intentionally EMPTY for the POC: we want every real CVE in
+    express@4.16.0, lodash@4.17.15, jsonwebtoken@8.5.1, ejs@2.5.5,
+    node-fetch@2.6.0 to surface and fail the pipeline.
+
+    In a real project, add <suppress> entries here ONLY for reviewed
+    false positives, with a documented justification, e.g.:
+
+    <suppress>
+      <notes>False positive - CVE applies to unused code path, reviewed 2026-01-01</notes>
+      <packageUrl regex="true">^pkg:npm/some-lib@.*$</packageUrl>
+      <cve>CVE-2024-00000</cve>
+    </suppress>
+  -->
+</suppressions>

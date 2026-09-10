@@ -1,0 +1,13 @@
+title = "gitleaks-config-devsecops-poc"
+
+# Standard Gitleaks ruleset - detects real-looking secret patterns
+# (AWS keys, private keys, generic high-entropy strings, etc).
+# The hardened app no longer has any hardcoded secrets planted in
+# source, so a clean run of this scan should pass.
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''docker-compose\.yml''',   # contains an obvious placeholder dev-only value, not a real secret
+]
