@@ -1,54 +1,84 @@
 # -----------------------------------------------------------------
-# HARDENED TERRAFORM (optional reference for Checkov/Trivy IaC scans)
-#
-# Fixes applied:
-#  - Private bucket, public access fully blocked
-#  - Versioning and access logging enabled
-#  - Default encryption enabled
-#  - Security group restricted to known CIDRs, no world-open SSH
+# HARDENED TERRAFORM
 # -----------------------------------------------------------------
+
+# ================================================================
+# S3 BUCKET
+# ================================================================
+
 resource "aws_s3_bucket" "poc_bucket" {
   bucket = "devsecops-poc-artifacts-example"
 }
 
+# Versioning
 resource "aws_s3_bucket_versioning" "poc_bucket_versioning" {
   bucket = aws_s3_bucket.poc_bucket.id
+
   versioning_configuration {
     status = "Enabled"
   }
 }
 
+# KMS encryption
+resource "aws_kms_key" "s3" {
+  description         = "KMS key for S3 bucket encryption"
+  enable_key_rotation = true
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "poc_bucket_encryption" {
   bucket = aws_s3_bucket.poc_bucket.id
+
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.s3.arn
     }
+
+    bucket_key_enabled = true
   }
 }
 
-resource "aws_s3_bucket_logging" "poc_bucket_logging" {
-  bucket        = aws_s3_bucket.poc_bucket.id
-  target_bucket = aws_s3_bucket.poc_bucket.id
-  target_prefix = "access-logs/"
-}
-
+# Public access completely blocked
 resource "aws_s3_bucket_public_access_block" "poc_bucket_block" {
-  bucket                  = aws_s3_bucket.poc_bucket.id
+  bucket = aws_s3_bucket.poc_bucket.id
+
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
 
+# Lifecycle
+resource "aws_s3_bucket_lifecycle_configuration" "poc_bucket_lifecycle" {
+  bucket = aws_s3_bucket.poc_bucket.id
+
+  rule {
+    id     = "delete-old-objects"
+    status = "Enabled"
+
+    expiration {
+      days = 90
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+}
+
+
+# ================================================================
+# SECURITY GROUP
+# ================================================================
+
 variable "trusted_cidr" {
-  description = "CIDR block allowed to reach admin/SSH ports - set this to your own IP, not 0.0.0.0/0"
+  description = "CIDR block allowed to reach admin/SSH ports"
   type        = string
 }
 
 resource "aws_security_group" "poc_sg" {
   name        = "devsecops-poc-sg"
-  description = "Restricted security group - app port and SSH limited to trusted_cidr only"
+  description = "Restricted security group"
 
   ingress {
     description = "SSH from trusted network only"
@@ -59,17 +89,19 @@ resource "aws_security_group" "poc_sg" {
   }
 
   ingress {
-    description = "App port from trusted network only"
+    description = "Application traffic"
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
     cidr_blocks = [var.trusted_cidr]
   }
 
+  # HTTPS only
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "HTTPS outbound"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
