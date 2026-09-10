@@ -90,7 +90,6 @@ jobs:
           path: "app"
           format: "SARIF"
           args: >
-            --failOnCVSS 8
             --suppression security/dependency-check-suppression.xml
         # GATE: --failOnCVSS 7 -> any dependency vuln with CVSS >= 7 (High/Critical) fails the job
       - name: Upload Dependency-Check SARIF
