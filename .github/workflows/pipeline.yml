@@ -137,11 +137,14 @@ jobs:
           node-version: "20"
       - name: Install & smoke-build
         working-directory: app
+        env:
+           JWT_SECRET: ci-smoke-test-secret-not-used-in-prod
+           ALLOWED_ORIGINS: http://localhost:3000
         run: |
-          npm install
-          node -e "require('./server.js')" &
-          sleep 3
-          curl -sf http://localhost:3000/ || (echo "App failed to boot" && exit 1)
+         npm install
+         node -e "require('./server.js')" &
+         sleep 3
+         curl -sf http://localhost:3000/ || (echo "App failed to boot" && exit 1)
 
   # 6. CONTAINER BUILD + IMAGE SCAN + SBOM
   container:
