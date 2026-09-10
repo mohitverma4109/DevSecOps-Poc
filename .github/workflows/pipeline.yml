@@ -107,7 +107,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Trivy filesystem scan (app source + deps)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "fs"
           scan-ref: "app"
@@ -116,7 +116,7 @@ jobs:
           format: "table"
 
       - name: Trivy IaC/config scan (Dockerfile, K8s manifests, Terraform)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "config"
           scan-ref: "."
@@ -161,7 +161,7 @@ jobs:
         run: docker build -t devsecops-poc/hardened-app:${{ github.sha }} ./app
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: "devsecops-poc/hardened-app:${{ github.sha }}"
           severity: "CRITICAL,HIGH"
@@ -169,7 +169,7 @@ jobs:
           format: "table"
 
       - name: Generate SBOM (Trivy - CycloneDX)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: "devsecops-poc/hardened-app:${{ github.sha }}"
           format: "cyclonedx"
@@ -182,7 +182,7 @@ jobs:
           path: sbom.cdx.json
 
       - name: License / compliance check (Trivy license scanner)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "fs"
           scan-ref: "app"
