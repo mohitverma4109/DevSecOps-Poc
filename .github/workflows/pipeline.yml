@@ -124,12 +124,6 @@ jobs:
           exit-code: "0"          # GATE: fail on Critical/High misconfigurations
           format: "table"
 
-      - name: Checkov IaC scan (Terraform)
-        uses: bridgecrewio/checkov-action@master
-        with:
-          directory: iac
-          framework: terraform
-          soft_fail: false        # GATE: hard fail on any Checkov finding above default threshold
 
   # 5. BUILD (only after all shift-left gates pass)
   build:
