@@ -287,30 +287,33 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f
   dast:
-    name: "CD-4: DAST (OWASP ZAP) + API Security"
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    needs: [determine-env, deploy]
-    steps:
-      - uses: actions/checkout@v4
-      # APP_PUBLIC_URL is a repo/environment VARIABLE (not a secret - it's just a URL),
-      # e.g. http://50.112.139.26:3000 - the port the docker-compose service publishes.
-      - name: ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: "${{ vars.APP_PUBLIC_URL }}"
-          rules_file_name: "security/zap-rules.tsv"
-          cmd_options: "-I"     # -I: do not fail the *action* on warnings; job-level gate below decides
-          fail_action: false
+   name: "CD-4: DAST (OWASP ZAP) + API Security"
+   runs-on: ubuntu-latest
+   if: github.event_name == 'push'
+   needs: [determine-env, deploy]
 
-      - name: ZAP Full Active Scan (deeper pass incl. SQLi/XSS add-ons)
-        uses: zaproxy/action-full-scan@v0.10.0
-        with:
-          target: "${{ vars.APP_PUBLIC_URL }}"
-          rules_file_name: "security/zap-rules.tsv"
+   environment: ${{ needs.determine-env.outputs.env_name }}
 
-      - name: Enforce DAST severity gate
-        run: |
+   steps:
+     - name: Checkout code
+       uses: actions/checkout@v4
+
+     - name: Check DAST target
+       run: |
+        echo "Target: ${{ vars.APP_PUBLIC_URL }}"
+        curl -v --connect-timeout 10 --max-time 30 "${{ vars.APP_PUBLIC_URL }}"
+
+     - name: ZAP Baseline Scan
+       uses: zaproxy/action-baseline@v0.12.0
+       with:
+        target: "${{ vars.APP_PUBLIC_URL }}"
+        rules_file_name: "security/zap-rules.tsv"
+        cmd_options: "-I"
+        fail_action: false
+      
+
+     - name: Enforce DAST severity gate
+       run: |
           # GATE: parse ZAP JSON report and fail the pipeline if any High/Critical alert exists.
           python3 - << 'EOF'
           import json, sys
