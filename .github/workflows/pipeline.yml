@@ -287,25 +287,37 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f
   dast:
-   name: "CD-4: DAST (OWASP ZAP) + API Security"
-   runs-on: ubuntu-latest
-   if: github.event_name == 'push'
-   needs: [determine-env, deploy]
+  name: "CD-4: DAST (OWASP ZAP)"
+  runs-on: ubuntu-latest
+  if: github.event_name == 'push'
+  needs: [determine-env, deploy]
 
-   environment: ${{ needs.determine-env.outputs.env_name }}
+  environment: ${{ needs.determine-env.outputs.env_name }}
 
-   steps:
-     - name: Checkout code
-       uses: actions/checkout@v4
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-     - name: Check DAST target
-       run: |
-        echo "Target: ${{ vars.APP_PUBLIC_URL }}"
-        curl -v --connect-timeout 10 --max-time 30 "${{ vars.APP_PUBLIC_URL }}"
+    - name: Debug environment
+      run: |
+        echo "Environment selected: ${{ needs.determine-env.outputs.env_name }}"
+        echo "APP_PUBLIC_URL length: ${#APP_PUBLIC_URL}"
+      env:
+        APP_PUBLIC_URL: ${{ vars.APP_PUBLIC_URL }}
 
-     - name: ZAP Baseline Scan
-       uses: zaproxy/action-baseline@v0.12.0
-       with:
+    - name: Test application connectivity
+      run: |
+        echo "Target: $APP_PUBLIC_URL"
+        curl -v \
+          --connect-timeout 10 \
+          --max-time 30 \
+          "$APP_PUBLIC_URL"
+      env:
+        APP_PUBLIC_URL: ${{ vars.APP_PUBLIC_URL }}
+
+    - name: ZAP Baseline Scan
+      uses: zaproxy/action-baseline@v0.12.0
+      with:
         target: "${{ vars.APP_PUBLIC_URL }}"
         rules_file_name: "security/zap-rules.tsv"
         cmd_options: "-I"
