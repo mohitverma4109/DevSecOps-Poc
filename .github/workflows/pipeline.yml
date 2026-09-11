@@ -270,18 +270,20 @@ jobs:
           IMAGE_URI: ${{ needs.build-and-push.outputs.image_uri }}
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          APP_JWT_SECRET: ${{ secrets.APP_JWT_SECRET }}
           APP_ALLOWED_ORIGINS: ${{ vars.APP_PUBLIC_URL }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: IMAGE_URI,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,APP_ALLOWED_ORIGINS
+          envs: IMAGE_URI,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,APP_JWT_SECRET,APP_ALLOWED_ORIGINS
           script: |
             set -e
             cd ~/devsecops-poc
             echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
             export IMAGE_URI="$IMAGE_URI"
+            export JWT_SECRET="$APP_JWT_SECRET"
             export ALLOWED_ORIGINS="$APP_ALLOWED_ORIGINS"
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
