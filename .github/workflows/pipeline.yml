@@ -287,14 +287,14 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f
   dast:
-  name: "CD-4: DAST (OWASP ZAP)"
-  runs-on: ubuntu-latest
-  if: github.event_name == 'push'
-  needs: [determine-env, deploy]
+   name: "CD-4: DAST (OWASP ZAP)"
+   runs-on: ubuntu-latest
+   if: github.event_name == 'push'
+   needs: [determine-env, deploy]
 
-  environment: ${{ needs.determine-env.outputs.env_name }}
+   environment: ${{ needs.determine-env.outputs.env_name }}
 
-  steps:
+   steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
