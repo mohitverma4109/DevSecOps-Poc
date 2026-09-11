@@ -272,35 +272,34 @@ jobs:
           source: "docker-compose.prod.yml"
           target: "~/devsecops-poc"
 
-      # The target host authenticates to ECR itself (e.g. an EC2 instance
-      # profile with ecr:GetAuthorizationToken/BatchGetImage permissions),
-      # so no AWS credentials are transmitted over SSH. See docs/DOCKER_COMPOSE_DEPLOY.md
-      # for the IAM policy and for the access-key fallback if the host isn't on AWS.
+      # If your Docker Hub repository is PRIVATE, the target host needs to
+      # log in too - DOCKERHUB_USERNAME/DOCKERHUB_TOKEN are forwarded over
+      # the SSH session. If your repo is PUBLIC, this login step is harmless
+      # but unnecessary - see docs/DOCKERHUB_SETUP.md.
+      # JWT_SECRET is NOT passed here - docker-compose.prod.yml reads it from
+      # a .env file that lives on the VM itself. See docs/DOCKER_COMPOSE_DEPLOY.md.
       - name: Deploy via Docker Compose over SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
           IMAGE_URI: ${{ needs.build-and-push.outputs.image_uri }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          APP_JWT_SECRET: ${{ secrets.APP_JWT_SECRET }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           APP_ALLOWED_ORIGINS: ${{ vars.APP_PUBLIC_URL }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: IMAGE_URI,AWS_REGION,APP_JWT_SECRET,APP_ALLOWED_ORIGINS
+          envs: IMAGE_URI,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,APP_ALLOWED_ORIGINS
           script: |
             set -e
             cd ~/devsecops-poc
-            REGISTRY=$(echo "$IMAGE_URI" | cut -d'/' -f1)
-            aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+            echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
             export IMAGE_URI="$IMAGE_URI"
-            export JWT_SECRET="$APP_JWT_SECRET"
             export ALLOWED_ORIGINS="$APP_ALLOWED_ORIGINS"
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d
             docker image prune -f
-
   dast:
     name: "CD-4: DAST (OWASP ZAP) + API Security"
     runs-on: ubuntu-latest
