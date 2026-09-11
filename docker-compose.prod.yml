@@ -1,14 +1,3 @@
-version: "3.8"
-
-# Used on the DEPLOYED host only (via the pipeline's SSH deploy step).
-# Unlike docker-compose.yml (local dev - builds from ./app), this pulls
-# the already-built, already-scanned image straight from ECR.
-#
-# IMAGE_URI is exported by the pipeline's deploy step before running
-# `docker compose -f docker-compose.prod.yml up -d`. For a manual run,
-# export it yourself first, e.g.:
-#   export IMAGE_URI=<account>.dkr.ecr.<region>.amazonaws.com/devsecops-poc/hardened-app:latest
-
 services:
   hardened-app:
     image: ${IMAGE_URI}
@@ -17,6 +6,6 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
-      - JWT_SECRET=${JWT_SECRET}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://50.112.139.26:3000}
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://50.112.139.26:3000}
