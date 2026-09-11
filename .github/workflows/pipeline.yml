@@ -18,9 +18,10 @@ on:
 
 permissions:
   contents: read
-  security-events: write   # required to upload SARIF to the Security tab
+  security-events: write
   pull-requests: write
-  id-token: write          # for OIDC auth to cloud/EKS if configured
+  issues: write
+  id-token: write
 
 jobs:
   # =================================================================
