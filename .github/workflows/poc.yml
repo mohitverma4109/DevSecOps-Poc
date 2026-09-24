@@ -1,10 +1,12 @@
 name: Accuknox SAST
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
   accuknox-cicd:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -17,3 +19,24 @@ jobs:
           accuknox_label: ${{ secrets.ACCUKNOX_LABEL }}
           soft_fail: "true"
           severity: "HIGH"
+
+  secret-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Secret Scan
+        uses: accuknox/secret-scan-action@latest
+        with:
+          branch: "main"
+          results: ""
+          exclude_paths: "tests/,docs/"
+          additional_arguments: ""
+          base_command: ""
+          upload_results: true
+          accuknox_token: ${{ secrets.ACCUKNOX_TOKEN }}
+          accuknox_endpoint: ${{ secrets.ACCUKNOX_ENDPOINT }}
+          accuknox_label: ${{ secrets.ACCUKNOX_LABEL }}
+          soft_fail: true
