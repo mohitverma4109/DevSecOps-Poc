@@ -21,6 +21,7 @@ jobs:
           severity: "HIGH"
 
   secret-scan:
+    needs: accuknox-cicd
     runs-on: ubuntu-latest
 
     steps:
